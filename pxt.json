@@ -1,0 +1,14 @@
+{
+  "name": "microbit-wire-comms",
+  "version": "1.0.0",
+  "description": "",
+  "dependencies": {
+    "core": "*"
+  },
+  "files": [
+    "src/main.ts"
+  ],
+  "supportedTargets": [
+    "microbit"
+  ]
+}
