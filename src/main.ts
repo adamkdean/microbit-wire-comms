@@ -4,8 +4,13 @@
 
 const wireComms = new WireComms(DigitalPin.P13, DigitalPin.P15, DigitalPin.P14)
 
+// Write start-up message to serial
+serial.writeLine('')
+serial.writeLine('+--------------------+')
+serial.writeLine('|  WireComms v1.0.0  |')
+serial.writeLine('+--------------------+')
+
 // On start, show a waiting ellipsis
-serial.writeLine('Device online')
 led.plot(1, 2)
 led.plot(2, 2)
 led.plot(3, 2)

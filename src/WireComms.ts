@@ -5,13 +5,16 @@
 enum Mode { Master, Slave }
 enum Status { None, Ready, Busy, Error }
 
+const p13eventSourceId = control.eventSourceId(EventBusSource.MICROBIT_ID_IO_P13)
+const pinRiseEvent = control.eventValueId(EventBusValue.MICROBIT_PIN_EVT_RISE)
+
 class WireComms {
   private sclk: DigitalPin
   private mosi: DigitalPin
   private miso: DigitalPin
   private mode: Mode
   private status: Status
-  private clockSpeed: number = 8 // Hz
+  private clockSpeed: number = 1 // Hz
 
   constructor(sclk: DigitalPin, mosi: DigitalPin, miso: DigitalPin) {
     this.sclk = sclk
@@ -40,15 +43,60 @@ class WireComms {
     if (this.mode === Mode.Master) {
       this.log('Master mode enabled')
       basic.showString('M')
+      this.initializeSerialClock()
     }
 
     if (this.mode === Mode.Slave) {
       this.log('Slave mode enabled')
       basic.showString('S')
+      this.initializeSlaveListen()
     }
+
+    // Debug
+    serial.writeLine(`MOSI: ${this.mosi}`)
+    serial.writeLine(`MISO: ${this.miso}`)
+    serial.writeLine(`SCLK: ${this.sclk}`)
 
     this.status = Status.Ready
     this.log('Ready')
+  }
+
+  private initializeSerialClock(): void {
+    // pins.setPull(this.sclk, PinPullMode.PullUp)
+    // control.inBackground(() => {
+    //   while (true) {
+    //     pins.digitalWritePin(this.sclk, 1)
+    //     basic.pause(1000 / this.clockSpeed)
+    //     pins.digitalWritePin(this.sclk, 0)
+    //     basic.pause(1000 / this.clockSpeed)
+    //   }
+    // })
+
+    const interval = 1000 / this.clockSpeed
+    serial.writeLine(`Serial clock initialised @ ${interval} ms (${this.clockSpeed} Hz)`)
+    loops.everyInterval(interval, () => {
+      basic.clearScreen()
+      pins.digitalWritePin(this.sclk, 1)
+      basic.pause(1)
+      pins.digitalWritePin(this.sclk, 0)
+      music.playTone(300, 50)
+    })
+  }
+
+  private initializeSlaveListen(): void {
+    // const pinRiseEvent = control.eventValueId(EventBusValue.MICROBIT_PIN_EVT_RISE)
+    // const sourceEventId = control.eventSourceId(EventBusSourceLookup[this.sclk])
+    // control.onEvent(sourceEventId, pinRiseEvent, () => {
+    this.log('Slave listening for clock')
+    control.onEvent(p13eventSourceId, pinRiseEvent, () => {
+      music.playTone(100, 50)
+      this.onSclkRise()
+    })
+    pins.setEvents(this.sclk, PinEventType.Edge)
+  }
+
+  private onSclkRise(): void {
+    this.log('SCLK rise')
   }
 
   private log(msg: string): void {
