@@ -6,7 +6,7 @@
     "core": "*"
   },
   "files": [
-    "src/main.ts"
+    "built/output.ts"
   ],
   "supportedTargets": [
     "microbit"
