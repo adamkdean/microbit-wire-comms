@@ -118,7 +118,7 @@ class WireComms {
   }
 
   private log(msg: string): void {
-    serial.writeLine(`WireComms: ${msg}`)
+    serial.writeLine(msg)
   }
 
   private throwError(msg: string): void {
