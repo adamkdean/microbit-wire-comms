@@ -6,7 +6,8 @@ enum Mode { Master, Slave }
 enum Status { None, Ready, Busy, Error }
 
 const p13eventSourceId = control.eventSourceId(EventBusSource.MICROBIT_ID_IO_P13)
-const pinRiseEvent = control.eventValueId(EventBusValue.MICROBIT_PIN_EVT_RISE)
+const pinEventRise = control.eventValueId(EventBusValue.MICROBIT_PIN_EVT_RISE)
+const pinEventPulseHi = control.eventValueId(EventBusValue.MICROBIT_PIN_EVT_PULSE_HI)
 
 class WireComms {
   private sclk: DigitalPin
@@ -62,37 +63,21 @@ class WireComms {
   }
 
   private initializeSerialClock(): void {
-    // pins.setPull(this.sclk, PinPullMode.PullUp)
-    // control.inBackground(() => {
-    //   while (true) {
-    //     pins.digitalWritePin(this.sclk, 1)
-    //     basic.pause(1000 / this.clockSpeed)
-    //     pins.digitalWritePin(this.sclk, 0)
-    //     basic.pause(1000 / this.clockSpeed)
-    //   }
-    // })
-
-    const interval = 1000 / this.clockSpeed
+    const interval = (1000 / this.clockSpeed) - 1
     serial.writeLine(`Serial clock initialised @ ${interval} ms (${this.clockSpeed} Hz)`)
     loops.everyInterval(interval, () => {
-      basic.clearScreen()
       pins.digitalWritePin(this.sclk, 1)
       basic.pause(1)
       pins.digitalWritePin(this.sclk, 0)
-      music.playTone(300, 50)
     })
   }
 
   private initializeSlaveListen(): void {
-    // const pinRiseEvent = control.eventValueId(EventBusValue.MICROBIT_PIN_EVT_RISE)
-    // const sourceEventId = control.eventSourceId(EventBusSourceLookup[this.sclk])
-    // control.onEvent(sourceEventId, pinRiseEvent, () => {
-    this.log('Slave listening for clock')
-    control.onEvent(p13eventSourceId, pinRiseEvent, () => {
-      music.playTone(100, 50)
-      this.onSclkRise()
-    })
+    const pinRiseEvent = control.eventValueId(EventBusValue.MICROBIT_PIN_EVT_RISE)
+    const sourceEventId = control.eventSourceId(EventBusSourceLookup[this.sclk])
+    control.onEvent(sourceEventId, pinRiseEvent, () => this.onSclkRise())
     pins.setEvents(this.sclk, PinEventType.Edge)
+    this.log('Slave listening for clock')
   }
 
   private onSclkRise(): void {

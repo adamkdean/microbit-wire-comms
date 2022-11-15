@@ -7,7 +7,7 @@
   "scripts": {
     "prep": "pxt target microbit && pxt install",
     "start": "pxt serve && pxt run",
-    "concat": "mkdir -p built && cat src/*.ts > built/output.ts",
+    "concat": "mkdir -p built && cat src/**/*.ts src/*.ts > built/output.ts",
     "build": "npm run concat && pxt build",
     "deploy": "npm run concat && pxt deploy",
     "monitor:1": "screen /dev/cu.usbmodem14302 115200",
