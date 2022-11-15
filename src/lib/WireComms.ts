@@ -5,10 +5,6 @@
 enum Mode { Master, Slave }
 enum Status { None, Ready, Busy, Error }
 
-const p13eventSourceId = control.eventSourceId(EventBusSource.MICROBIT_ID_IO_P13)
-const pinEventRise = control.eventValueId(EventBusValue.MICROBIT_PIN_EVT_RISE)
-const pinEventPulseHi = control.eventValueId(EventBusValue.MICROBIT_PIN_EVT_PULSE_HI)
-
 class WireComms {
   private sclk: DigitalPin
   private mosi: DigitalPin
