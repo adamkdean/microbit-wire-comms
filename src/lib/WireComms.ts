@@ -15,7 +15,8 @@ class WireComms {
   private miso: DigitalPin
   private mode: Mode
   private status: Status
-  private clockSpeed: number = 1 // Hz
+  private clockSpeed: number = 16 // Hz
+  private buffer: boolean[] = []
 
   constructor(sclk: DigitalPin, mosi: DigitalPin, miso: DigitalPin) {
     this.sclk = sclk
@@ -41,47 +42,79 @@ class WireComms {
     if (this.status !== Status.None) return this.throwError('Already initialized')
     if (this.mode === undefined) return this.throwError('WireComms: Mode not set')
 
+    this.log(`Initializing with pins SCLK: ${this.sclk}, MOSI: ${this.mosi}, MISO: ${this.miso}`)
+
     if (this.mode === Mode.Master) {
       this.log('Master mode enabled')
       basic.showString('M')
-      this.initializeSerialClock()
+      this.initializeMaster()
     }
 
     if (this.mode === Mode.Slave) {
       this.log('Slave mode enabled')
       basic.showString('S')
-      this.initializeSlaveListen()
+      this.initializeSlave()
     }
-
-    // Debug
-    serial.writeLine(`MOSI: ${this.mosi}`)
-    serial.writeLine(`MISO: ${this.miso}`)
-    serial.writeLine(`SCLK: ${this.sclk}`)
 
     this.status = Status.Ready
     this.log('Ready')
   }
 
-  private initializeSerialClock(): void {
-    const interval = (1000 / this.clockSpeed) - 1
-    serial.writeLine(`Serial clock initialised @ ${interval} ms (${this.clockSpeed} Hz)`)
-    loops.everyInterval(interval, () => {
-      pins.digitalWritePin(this.sclk, 1)
-      basic.pause(1)
-      pins.digitalWritePin(this.sclk, 0)
+  private initializeMaster(): void {
+    this.initializeSerialClock()
+
+    input.onButtonPressed(Button.A, () => {
+      this.sendByte(0x55)
     })
   }
 
-  private initializeSlaveListen(): void {
+  private initializeSlave(): void {
     const pinRiseEvent = control.eventValueId(EventBusValue.MICROBIT_PIN_EVT_RISE)
     const sourceEventId = control.eventSourceId(EventBusSourceLookup[this.sclk])
-    control.onEvent(sourceEventId, pinRiseEvent, () => this.onSclkRise())
+    control.onEvent(sourceEventId, pinRiseEvent, () => this.onSclkRecv())
     pins.setEvents(this.sclk, PinEventType.Edge)
     this.log('Slave listening for clock')
   }
 
-  private onSclkRise(): void {
-    this.log('SCLK rise')
+  private initializeSerialClock(): void {
+    const interval = (1000 / this.clockSpeed) - 1
+    serial.writeLine(`Serial clock initialised @ ${interval} ms (${this.clockSpeed} Hz)`)
+    loops.everyInterval(interval, () => this.onSclkSend())
+  }
+
+  private onSclkSend(): void {
+    // Only enable clock if we have data to send
+    if (this.buffer.length === 0) return
+
+    const bit = this.buffer.shift()
+    this.log(`Sending bit: ${bit ? 1 : 0}`)
+
+    // Set SCLK high
+    pins.digitalWritePin(this.sclk, 1)
+    if (bit) pins.digitalWritePin(this.mosi, 1)
+    else pins.digitalWritePin(this.mosi, 0)
+
+    // Wait, then reset SCLK & MOSI
+    basic.pause(1)
+    pins.digitalWritePin(this.sclk, 0)
+    pins.digitalWritePin(this.mosi, 0)
+  }
+
+  private onSclkRecv(): void {
+    // TODO: more
+    const bit = pins.digitalReadPin(this.mosi)
+    this.log(`Received bit: ${bit}`)
+    music.playTone(200, 1)
+  }
+
+  private sendByte(byte: number): void {
+    const bits = []
+    for (let i = 0; i < 8; i++) {
+      const bit = (byte >> i) & 1
+      this.buffer.push(bit === 1)
+      bits.push(bit)
+    }
+    this.log(`Byte queued ${byte} [${bits.join(',')}]`)
   }
 
   private log(msg: string): void {
