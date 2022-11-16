@@ -5,14 +5,24 @@
 enum Mode { Master, Slave }
 enum Status { None, Ready, Busy, Error }
 
+const message = `This is a long message. It uses at most 125 bytes, which is the maximum length of a message due BBC MB to memory constraints.`
+
 class WireComms {
   private sclk: DigitalPin
   private mosi: DigitalPin
   private miso: DigitalPin
   private mode: Mode
   private status: Status
-  private clockSpeed: number = 16 // Hz
-  private buffer: boolean[] = []
+  private clockSpeed: number = 8 // Hz
+
+  // Writing buffers
+  private writeBitBuffer: number[] = []
+
+  // Reading buffers
+  private readBitBuffer: number[] = []
+  private readByteBuffer: number[] = []
+  // private readStreamSynchronized: boolean = false
+  private readTransmissionActive: boolean = false
 
   constructor(sclk: DigitalPin, mosi: DigitalPin, miso: DigitalPin) {
     this.sclk = sclk
@@ -60,7 +70,11 @@ class WireComms {
     this.initializeSerialClock()
 
     input.onButtonPressed(Button.A, () => {
-      this.sendByte(0x55)
+      this.sendString('TEST')
+    })
+
+    input.onButtonPressed(Button.B, () => {
+      this.sendString(message)
     })
   }
 
@@ -79,16 +93,17 @@ class WireComms {
   }
 
   private onSclkSend(): void {
-    // Only enable clock if we have data to send
-    if (this.buffer.length === 0) return
-
-    const bit = this.buffer.shift()
-    this.log(`Sending bit: ${bit ? 1 : 0}`)
+    const bit = this.writeBitBuffer.shift()
 
     // Set SCLK high
     pins.digitalWritePin(this.sclk, 1)
-    if (bit) pins.digitalWritePin(this.mosi, 1)
-    else pins.digitalWritePin(this.mosi, 0)
+
+    // Set MOSI to bit value (if defined)
+    if (bit !== undefined) {
+      if (bit) pins.digitalWritePin(this.mosi, 1)
+      // this.log(`TX: ${bit ? 1 : 0}`)
+      // music.playTone(800, 5)
+    }
 
     // Wait, then reset SCLK & MOSI
     basic.pause(1)
@@ -97,20 +112,77 @@ class WireComms {
   }
 
   private onSclkRecv(): void {
-    // TODO: more
     const bit = pins.digitalReadPin(this.mosi)
-    this.log(`Received bit: ${bit}`)
-    music.playTone(200, 1)
+    this.readBitBuffer.push(bit)
+
+    // If transmission isn't active, check for start of transmission
+    if (!this.readTransmissionActive && this.readBitBuffer.length === 8) {
+      const byte = this.getByteFromBuffer(this.readBitBuffer)
+      if (byte === AsciiControlCodes.START_OF_TEXT) {
+        this.log('Transmission started')
+        this.readTransmissionActive = true
+        this.readByteBuffer = []
+        this.readBitBuffer = []
+        music.playTone(400, 10)
+      } else {
+        // Otherwise, shift a bit from the buffer to make space for the next bit
+        // until eventually, the START_OF_TEXT byte is received
+        this.readBitBuffer.shift()
+      }
+    }
+
+    // If transmission is active and we have a full byte, process it
+    else if (this.readTransmissionActive) {
+      if (this.readBitBuffer.length === 8) {
+        const byte = this.getByteFromBuffer(this.readBitBuffer)
+        this.onByteReceived(byte)
+        this.readBitBuffer = []
+      } else {
+        music.playTone(50, 5)
+      }
+    }
+  }
+
+  private onByteReceived(byte: number): void {
+    this.log(`Byte received: ${byte}`)
+
+    if (this.readTransmissionActive) {
+      if (byte === AsciiControlCodes.END_OF_TEXT) {
+        const str = this.readByteBuffer.reduce((acc, byte) => acc + String.fromCharCode(byte), '')
+        this.readTransmissionActive = false
+        this.readByteBuffer = []
+        this.log(`> ${str} (${str.length} bytes)`)
+        this.log('Transmission ended')
+        music.playTone(200, 10)
+      } else {
+        this.readByteBuffer.push(byte)
+        music.playTone(300, 5)
+      }
+    }
+  }
+
+  private getByteFromBuffer(buffer: number[]): number {
+    return buffer.reduce((acc, bit, i) => acc + (bit << i), 0)
+  }
+
+  private sendString(str: string): void {
+    if (str.length * 8 > 1000) return this.throwError('String too long')
+
+    this.sendByte(AsciiControlCodes.START_OF_TEXT)
+    for (let i = 0; i < str.length; i++) {
+      this.sendByte(str.charCodeAt(i))
+    }
+    this.sendByte(AsciiControlCodes.END_OF_TEXT)
   }
 
   private sendByte(byte: number): void {
     const bits = []
     for (let i = 0; i < 8; i++) {
       const bit = (byte >> i) & 1
-      this.buffer.push(bit === 1)
+      this.writeBitBuffer.push(bit)
       bits.push(bit)
     }
-    this.log(`Byte queued ${byte} [${bits.join(',')}]`)
+    this.log(`Byte queued ${byte} ${String.fromCharCode(byte)} ${bits.join('')}`)
   }
 
   private log(msg: string): void {
