@@ -5,7 +5,8 @@
 enum Mode { Master, Slave }
 enum Status { None, Ready, Busy, Error }
 
-const message = `This is a long message. It uses at most 125 bytes, which is the maximum length of a message due BBC MB to memory constraints.`
+const maxMessage = `This is a long message. It uses at most 125 bytes, which is the maximum length of a message due BBC MB to memory constraints.`
+const message = `0123456789ABCDEF`
 
 class WireComms {
   private sclk: DigitalPin
@@ -13,7 +14,7 @@ class WireComms {
   private miso: DigitalPin
   private mode: Mode
   private status: Status
-  private clockSpeed: number = 8 // Hz
+  private clockSpeed: number = 128 // Hz
 
   // Writing buffers
   private writeBitBuffer: number[] = []
@@ -21,7 +22,7 @@ class WireComms {
   // Reading buffers
   private readBitBuffer: number[] = []
   private readByteBuffer: number[] = []
-  // private readStreamSynchronized: boolean = false
+  private readTransmissionStartTime: number = 0
   private readTransmissionActive: boolean = false
 
   constructor(sclk: DigitalPin, mosi: DigitalPin, miso: DigitalPin) {
@@ -48,29 +49,29 @@ class WireComms {
     if (this.status !== Status.None) return this.throwError('Already initialized')
     if (this.mode === undefined) return this.throwError('WireComms: Mode not set')
 
-    this.log(`Initializing with pins SCLK: ${this.sclk}, MOSI: ${this.mosi}, MISO: ${this.miso}`)
+    serial.writeLine(`Initializing with pins SCLK: ${this.sclk}, MOSI: ${this.mosi}, MISO: ${this.miso}`)
 
     if (this.mode === Mode.Master) {
-      this.log('Master mode enabled')
+      serial.writeLine('Master mode enabled')
       basic.showString('M')
       this.initializeMaster()
     }
 
     if (this.mode === Mode.Slave) {
-      this.log('Slave mode enabled')
+      serial.writeLine('Slave mode enabled')
       basic.showString('S')
       this.initializeSlave()
     }
 
     this.status = Status.Ready
-    this.log('Ready')
+    serial.writeLine('Ready')
   }
 
   private initializeMaster(): void {
     this.initializeSerialClock()
 
     input.onButtonPressed(Button.A, () => {
-      this.sendString('TEST')
+      this.sendString('TEDDY')
     })
 
     input.onButtonPressed(Button.B, () => {
@@ -83,7 +84,7 @@ class WireComms {
     const sourceEventId = control.eventSourceId(EventBusSourceLookup[this.sclk])
     control.onEvent(sourceEventId, pinRiseEvent, () => this.onSclkRecv())
     pins.setEvents(this.sclk, PinEventType.Edge)
-    this.log('Slave listening for clock')
+    serial.writeLine('Slave listening for clock')
   }
 
   private initializeSerialClock(): void {
@@ -101,7 +102,7 @@ class WireComms {
     // Set MOSI to bit value (if defined)
     if (bit !== undefined) {
       if (bit) pins.digitalWritePin(this.mosi, 1)
-      // this.log(`TX: ${bit ? 1 : 0}`)
+      // serial.writeLine(`TX: ${bit ? 1 : 0}`)
       // music.playTone(800, 5)
     }
 
@@ -119,11 +120,12 @@ class WireComms {
     if (!this.readTransmissionActive && this.readBitBuffer.length === 8) {
       const byte = this.getByteFromBuffer(this.readBitBuffer)
       if (byte === AsciiControlCodes.START_OF_TEXT) {
-        this.log('Transmission started')
+        serial.writeLine('Transmission started')
         this.readTransmissionActive = true
+        this.readTransmissionStartTime = input.runningTime()
         this.readByteBuffer = []
         this.readBitBuffer = []
-        music.playTone(400, 10)
+        // music.playTone(400, 10)
       } else {
         // Otherwise, shift a bit from the buffer to make space for the next bit
         // until eventually, the START_OF_TEXT byte is received
@@ -137,26 +139,32 @@ class WireComms {
         const byte = this.getByteFromBuffer(this.readBitBuffer)
         this.onByteReceived(byte)
         this.readBitBuffer = []
-      } else {
-        music.playTone(50, 5)
       }
     }
   }
 
   private onByteReceived(byte: number): void {
-    this.log(`Byte received: ${byte}`)
+    // serial.writeLine(`Byte received: ${byte} (${String.fromCharCode(byte)})`)
+    if (byte > 31 && byte < 127) serial.writeString(String.fromCharCode(byte))
 
     if (this.readTransmissionActive) {
       if (byte === AsciiControlCodes.END_OF_TEXT) {
         const str = this.readByteBuffer.reduce((acc, byte) => acc + String.fromCharCode(byte), '')
+        const duration = input.runningTime() - this.readTransmissionStartTime
+        const bitsPerSec = ((this.readByteBuffer.length + 2) * 8) / (duration / 1000)
+        const bitsPerSecRounded = Math.round(bitsPerSec * 100) / 100
         this.readTransmissionActive = false
         this.readByteBuffer = []
-        this.log(`> ${str} (${str.length} bytes)`)
-        this.log('Transmission ended')
-        music.playTone(200, 10)
+        serial.writeLine('')
+        serial.writeLine('Transmission ended')
+        serial.writeLine(`> Content-size: ${str.length * 8} bits / ${str.length} bytes`)
+        serial.writeLine(`> Transmission-size: ${(str.length + 2) * 8} bits / ${str.length + 2} bytes`)
+        serial.writeLine(`> Transmission-time: ${duration} ms`)
+        serial.writeLine(`> Transmission-speed: ${bitsPerSecRounded} bps`)
+        // music.playTone(200, 10)
       } else {
         this.readByteBuffer.push(byte)
-        music.playTone(300, 5)
+        // music.playTone(300, 5)
       }
     }
   }
@@ -173,6 +181,9 @@ class WireComms {
       this.sendByte(str.charCodeAt(i))
     }
     this.sendByte(AsciiControlCodes.END_OF_TEXT)
+
+    serial.writeLine(`String queued: ${str}`)
+    serial.writeLine(`> Content-length: ${str.length}`)
   }
 
   private sendByte(byte: number): void {
@@ -182,16 +193,12 @@ class WireComms {
       this.writeBitBuffer.push(bit)
       bits.push(bit)
     }
-    this.log(`Byte queued ${byte} ${String.fromCharCode(byte)} ${bits.join('')}`)
-  }
-
-  private log(msg: string): void {
-    serial.writeLine(msg)
+    // serial.writeLine(`Byte queued ${byte} ${String.fromCharCode(byte)} ${bits.join('')}`)
   }
 
   private throwError(msg: string): void {
     this.status = Status.Error
     basic.showString('E')
-    this.log(`Error: ${msg}`)
+    serial.writeLine(`Error: ${msg}`)
   }
 }
